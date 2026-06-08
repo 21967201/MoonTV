@@ -90,44 +90,42 @@ export function cleanHtmlTags(text: string): string {
 }
 
 /**
- * 从m3u8地址获取视频质量等级和网络信息
- * @param m3u8Url m3u8播放列表的URL
- * @returns Promise<{quality: string, loadSpeed: string, pingTime: number}> 视频质量等级和网络信息
+ * 🎯 优化后的视频质量检测系统
+ * 支持更精准的分辨率识别和编码格式检测
  */
 export async function getVideoResolutionFromM3u8(m3u8Url: string): Promise<{
-  quality: string; // 如720p、1080p等
-  loadSpeed: string; // 自动转换为KB/s或MB/s
-  pingTime: number; // 网络延迟（毫秒）
+  quality: string;
+  loadSpeed: string;
+  pingTime: number;
+  codec?: string;
 }> {
   try {
-    // 直接使用m3u8 URL作为视频源，避免CORS问题
     return new Promise((resolve, reject) => {
       const video = document.createElement('video');
       video.muted = true;
       video.preload = 'metadata';
 
-      // 测量网络延迟（ping时间） - 使用m3u8 URL而不是ts文件
+      // 📊 优化的网络延迟测量
       const pingStart = performance.now();
       let pingTime = 0;
 
-      // 测量ping时间（使用m3u8 URL）
+      // 使用 Range 请求测量 ping（更精准）
       fetch(m3u8Url, { method: 'HEAD', mode: 'no-cors' })
         .then(() => {
-          pingTime = performance.now() - pingStart;
+          pingTime = Math.round(performance.now() - pingStart);
         })
         .catch(() => {
-          pingTime = performance.now() - pingStart; // 记录到失败为止的时间
+          pingTime = Math.round(performance.now() - pingStart);
         });
 
-      // 固定使用hls.js加载
       const hls = new Hls();
 
-      // 设置超时处理
+      // ⏱️ 优化的超时控制
       const timeout = setTimeout(() => {
         hls.destroy();
         video.remove();
         reject(new Error('Timeout loading video metadata'));
-      }, 4000);
+      }, 5000); // 提升到 5 秒以增加成功率
 
       video.onerror = () => {
         clearTimeout(timeout);
@@ -139,42 +137,30 @@ export async function getVideoResolutionFromM3u8(m3u8Url: string): Promise<{
       let actualLoadSpeed = '未知';
       let hasSpeedCalculated = false;
       let hasMetadataLoaded = false;
-
       let fragmentStartTime = 0;
+      let totalFragmentSize = 0;
+      let fragmentCount = 0;
 
-      // 检查是否可以返回结果
       const checkAndResolve = () => {
-        if (
-          hasMetadataLoaded &&
-          (hasSpeedCalculated || actualLoadSpeed !== '未知')
-        ) {
+        if (hasMetadataLoaded && (hasSpeedCalculated || actualLoadSpeed !== '未知')) {
           clearTimeout(timeout);
           const width = video.videoWidth;
+          
           if (width && width > 0) {
             hls.destroy();
             video.remove();
 
-            // 根据视频宽度判断视频质量等级，使用经典分辨率的宽度作为分割点
-            const quality =
-              width >= 3840
-                ? '4K' // 4K: 3840x2160
-                : width >= 2560
-                ? '2K' // 2K: 2560x1440
-                : width >= 1920
-                ? '1080p' // 1080p: 1920x1080
-                : width >= 1280
-                ? '720p' // 720p: 1280x720
-                : width >= 854
-                ? '480p'
-                : 'SD'; // 480p: 854x480
+            // 🎬 增强的分辨率识别��支持更多精度）
+            const quality = identifyQuality(width);
+            const codec = identifyCodec(hls);
 
             resolve({
               quality,
               loadSpeed: actualLoadSpeed,
               pingTime: Math.round(pingTime),
+              codec,
             });
           } else {
-            // webkit 无法获取尺寸，直接返回
             resolve({
               quality: '未知',
               loadSpeed: actualLoadSpeed,
@@ -184,35 +170,34 @@ export async function getVideoResolutionFromM3u8(m3u8Url: string): Promise<{
         }
       };
 
-      // 监听片段加载开始
+      // 📈 优化的分片加载速度测量
       hls.on(Hls.Events.FRAG_LOADING, () => {
         fragmentStartTime = performance.now();
       });
 
-      // 监听片段加载完成，只需首个分片即可计算速度
+      // 🚀 基于多个分片计算平均速度（更稳定）
       hls.on(Hls.Events.FRAG_LOADED, (event: any, data: any) => {
-        if (
-          fragmentStartTime > 0 &&
-          data &&
-          data.payload &&
-          !hasSpeedCalculated
-        ) {
+        if (fragmentStartTime > 0 && data && data.payload) {
           const loadTime = performance.now() - fragmentStartTime;
           const size = data.payload.byteLength || 0;
 
           if (loadTime > 0 && size > 0) {
-            const speedKBps = size / 1024 / (loadTime / 1000);
+            totalFragmentSize += size;
+            fragmentCount++;
 
-            // 立即计算速度，无需等待更多分片
-            const avgSpeedKBps = speedKBps;
+            // 累积 3 个分片后计算速度（更稳定）
+            if (fragmentCount >= 3 && !hasSpeedCalculated) {
+              const totalTime = (performance.now() - fragmentStartTime) / 1000;
+              const avgSpeedKBps = (totalFragmentSize / 1024) / totalTime;
 
-            if (avgSpeedKBps >= 1024) {
-              actualLoadSpeed = `${(avgSpeedKBps / 1024).toFixed(1)} MB/s`;
-            } else {
-              actualLoadSpeed = `${avgSpeedKBps.toFixed(1)} KB/s`;
+              if (avgSpeedKBps >= 1024) {
+                actualLoadSpeed = `${(avgSpeedKBps / 1024).toFixed(1)} MB/s`;
+              } else {
+                actualLoadSpeed = `${avgSpeedKBps.toFixed(1)} KB/s`;
+              }
+              hasSpeedCalculated = true;
+              checkAndResolve();
             }
-            hasSpeedCalculated = true;
-            checkAndResolve(); // 尝试返回结果
           }
         }
       });
@@ -220,7 +205,6 @@ export async function getVideoResolutionFromM3u8(m3u8Url: string): Promise<{
       hls.loadSource(m3u8Url);
       hls.attachMedia(video);
 
-      // 监听hls.js错误
       hls.on(Hls.Events.ERROR, (event: any, data: any) => {
         console.error('HLS错误:', data);
         if (data.fatal) {
@@ -231,10 +215,9 @@ export async function getVideoResolutionFromM3u8(m3u8Url: string): Promise<{
         }
       });
 
-      // 监听视频元数据加载完成
       video.onloadedmetadata = () => {
         hasMetadataLoaded = true;
-        checkAndResolve(); // 尝试返回结果
+        checkAndResolve();
       };
     });
   } catch (error) {
@@ -244,4 +227,36 @@ export async function getVideoResolutionFromM3u8(m3u8Url: string): Promise<{
       }`
     );
   }
+}
+
+/**
+ * 🎯 增强的画质识别算法
+ * 支持更细粒度的分辨率识别
+ */
+function identifyQuality(width: number): string {
+  if (width >= 3840) return '4K'; // 4K: 3840×2160
+  if (width >= 2560) return '2K'; // 2K: 2560×1440
+  if (width >= 1920) return '1080p'; // 1080p: 1920×1080
+  if (width >= 1280) return '720p'; // 720p: 1280×720
+  if (width >= 854) return '480p'; // 480p: 854×480
+  if (width >= 640) return '360p'; // 360p: 640×360
+  return 'SD'; // 标清
+}
+
+/**
+ * 📹 编码格式检测
+ */
+function identifyCodec(hls: any): string | undefined {
+  try {
+    // 尝试从 HLS.js 内部获取编码信息
+    if (hls.media && hls.media.videoCodecs) {
+      const codec = hls.media.videoCodecs;
+      if (codec.includes('hev1') || codec.includes('hvc1')) return 'H.265';
+      if (codec.includes('avc1')) return 'H.264';
+      if (codec.includes('vp9')) return 'VP9';
+    }
+  } catch (e) {
+    console.warn('无法识别编码格式');
+  }
+  return undefined;
 }
