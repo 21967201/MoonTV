@@ -1109,16 +1109,20 @@ function PlayPageClient() {
               video.hls.destroy();
             }
             const hls = new Hls({
-              debug: false, // 关闭日志
-              enableWorker: true, // WebWorker 解码，降低主线程压力
-              lowLatencyMode: true, // 开启低延迟 LL-HLS
-
-              /* 缓冲/内存相关 */
-              maxBufferLength: 30, // 前向缓冲最大 30s，过大容易导致高延迟
-              backBufferLength: 30, // 仅保留 30s 已播放内容，避免内存占用
-              maxBufferSize: 60 * 1000 * 1000, // 约 60MB，超出后触发清理
-
-              /* 自定义loader */
+              debug: false,
+              enableWorker: true,
+              lowLatencyMode: false,
+              capLevelToPlayerSize: false,
+              startLevel: -1,
+              abrEwmaDefaultEstimate: 500000,
+              abrEwmaFastLive: 3,
+              abrEwmaSlowLive: 9,
+              abrEwmaFastVoD: 3,
+              abrEwmaSlowVoD: 9,
+              maxBufferLength: 60,
+              backBufferLength: 30,
+              maxBufferSize: 120 * 1000 * 1000,
+              maxMaxBufferLength: 600,
               loader: blockAdEnabledRef.current
                 ? CustomHlsJsLoader
                 : Hls.DefaultConfig.loader,
@@ -1127,6 +1131,45 @@ function PlayPageClient() {
             hls.loadSource(url);
             hls.attachMedia(video);
             video.hls = hls;
+
+            hls.on(Hls.Events.MANIFEST_PARSED, function (_event: any, data: any) {
+              if (data.levels && data.levels.length > 1) {
+                hls.currentLevel = data.levels.length - 1;
+              }
+
+              if (data.levels && data.levels.length > 0 && artPlayerRef.current) {
+                const qualityItems: any[] = [
+                  { html: '自动', value: -1 },
+                ];
+                data.levels.forEach((level: any, index: number) => {
+                  const h = level.height;
+                  let label = `${h}p`;
+                  if (h >= 3840) label = '4K';
+                  else if (h >= 2560) label = '2K';
+                  else if (h >= 1920) label = '1080p';
+                  else if (h >= 1280) label = '720p';
+                  else if (h >= 854) label = '480p';
+                  const bitrate = level.bitrate ? ` ${(level.bitrate / 1000).toFixed(0)}kbps` : '';
+                  qualityItems.push({
+                    html: `${label}${bitrate}`,
+                    value: index,
+                  });
+                });
+
+                try {
+                  const settings = artPlayerRef.current?.settings;
+                  if (settings) {
+                    const qualitySetting = settings.find((s: any) => s.html === '画质');
+                    if (qualitySetting) {
+                      qualitySetting.selector = qualityItems;
+                      qualitySetting.default = qualityItems.length > 1 ? qualityItems[qualityItems.length - 1].value : -1;
+                    }
+                  }
+                } catch (e) {
+                  // settings update failed
+                }
+              }
+            });
 
             ensureVideoSource(video, url);
 
@@ -1180,6 +1223,23 @@ function PlayPageClient() {
                 // ignore
               }
               return newVal ? '当前开启' : '当前关闭';
+            },
+          },
+          {
+            html: '画质',
+            width: 150,
+            tooltip: '选择画质',
+            selector: [],
+            onSelect: function (item: any) {
+              if (artPlayerRef.current?.video?.hls) {
+                const hls = artPlayerRef.current.video.hls;
+                if (item.value === -1) {
+                  hls.currentLevel = -1;
+                } else {
+                  hls.currentLevel = item.value;
+                }
+              }
+              return item.html;
             },
           },
         ],
