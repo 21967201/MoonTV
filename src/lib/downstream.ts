@@ -92,7 +92,7 @@ export async function searchFromApi(
         source_name: apiName,
         class: item.vod_class,
         year: item.vod_year
-          ? item.vod_year.match(/\d{4}/?.[0] || ''
+          ? (item.vod_year.match(/\d{4}/)?.[0] || '')
           : 'unknown',
         desc: cleanHtmlTags(item.vod_content || ''),
         type_name: item.type_name,
@@ -168,7 +168,7 @@ export async function searchFromApi(
                 source_name: apiName,
                 class: item.vod_class,
                 year: item.vod_year
-                  ? item.vod_year.match(/\d{4}/?.[0] || ''
+                  ? (item.vod_year.match(/\d{4}/)?.[0] || '')
                   : 'unknown',
                 desc: cleanHtmlTags(item.vod_content || ''),
                 type_name: item.type_name,
@@ -274,7 +274,7 @@ export async function getDetailFromApi(
     source_name: apiSite.name,
     class: videoDetail.vod_class,
     year: videoDetail.vod_year
-      ? videoDetail.vod_year.match(/\d{4}/?.[0] || ''
+      ? (videoDetail.vod_year.match(/\d{4}/)?.[0] || '')
       : 'unknown',
     desc: cleanHtmlTags(videoDetail.vod_content),
     type_name: videoDetail.type_name,
