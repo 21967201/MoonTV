@@ -1,0 +1,53 @@
+{
+  "jobs": {
+    "deploy": {
+      "steps": [
+        {
+          "name": "Checkout",
+          "uses": "actions/checkout@v4"
+        },
+        {
+          "with": {
+            "node-version": "20"
+          },
+          "name": "Setup Node",
+          "uses": "actions/setup-node@v4"
+        },
+        {
+          "with": {
+            "version": "10"
+          },
+          "name": "Setup pnpm",
+          "uses": "pnpm/action-setup@v4"
+        },
+        {
+          "name": "Install dependencies",
+          "run": "pnpm install --frozen-lockfile"
+        },
+        {
+          "name": "Build",
+          "run": "pnpm run pages:build"
+        },
+        {
+          "with": {
+            "apiToken": "${{ secrets.CLOUDFLARE_API_TOKEN }}",
+            "accountId": "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}",
+            "command": "pages deploy .vercel/output/static --project-name=moontv"
+          },
+          "name": "Deploy to Cloudflare Pages",
+          "uses": "cloudflare/wrangler-action@v3"
+        }
+      ],
+      "runs-on": "ubuntu-latest"
+    }
+  },
+  "name": "Deploy to Cloudflare Pages",
+  "on": {
+    "push": {
+      "branches": [
+        "main"
+      ]
+    },
+    "workflow_dispatch": {}
+  }
+}
